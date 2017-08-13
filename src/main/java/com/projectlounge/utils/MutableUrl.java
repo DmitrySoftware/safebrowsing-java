@@ -14,78 +14,78 @@ public class MutableUrl {
     private static final String PATH = "/";
     private static final String PORT = ":";
 
+    @NonNull private String scheme;
+    @NonNull private String port;
     @NonNull private String host;
     @NonNull private String path;
-    @NonNull private String url;
-    private int pathStart;
-    private int pathEnd;
-    private int hostStart;
-    private int hostEnd;
-    private int portIdx;
+    @NonNull private String params;
+    @NonNull private String fragment;
 
     public MutableUrl(final String url) {
-        update(url);
+        init(url);
     }
 
-    private void update(final String _url) {
-        if (null==_url) return;
-        url = fixUrl(_url);
-        final int schemeStart = url.indexOf(SCHEME);
-        hostStart = schemeStart + SCHEME.length();
-        portIdx = url.indexOf(PORT, hostStart);
-        pathStart = url.indexOf(PATH, hostStart);
-        pathStart = pathStart < 0 ? url.length() : pathStart;
-        hostEnd = portIdx >= 0 ? portIdx : pathStart;
-        host = url.substring(hostStart, hostEnd);
-        int fragment = Utils.findFragmentIndex(url, pathStart);
-        fragment = fragment<0 || fragment<pathStart ? Integer.MAX_VALUE : fragment;
-        int params = url.indexOf("?");
-        params = params < 0 ? Integer.MAX_VALUE : params;
-        final int min = Math.min(fragment, params);
-        pathEnd = (min == Integer.MAX_VALUE) ? url.length() : min;
-        path = url.substring(pathStart, pathEnd);
+    private void init(final String input) {
+        if (null==input || input.trim().isEmpty()) throw new IllegalArgumentException("Empty URL!");
+        setDefaults();
+        parseUrl(input);
     }
 
-    private String fixUrl(final String url) {
-        String result = url.trim();
-        if (!result.contains(SCHEME)) {
-            result = "http://" + result;
+    private void setDefaults() {
+        scheme = "";
+        port = "";
+        host = "";
+        path = "";
+        params = "";
+        fragment = "";
+    }
+
+    private void parseUrl(final String input) {
+        String url = input.trim();
+        if (!url.contains(SCHEME)) {
+            url = "http://" + url;
         }
-        return result;
-    }
-
-    public void setHost(final String host) {
-        if (null==host || host.trim().isEmpty()) return;
-        replace(host, hostStart, hostEnd);
+        final int schemeStart = url.indexOf(SCHEME);
+        final int hostStart = schemeStart + SCHEME.length();
+        setScheme(url.substring(0, hostStart));
+        final int portIdx = url.indexOf(PORT, hostStart);
+        int pathStart = url.indexOf(PATH, hostStart);
+        pathStart = pathStart < 0 ? url.length() : pathStart;
+        if (portIdx > 0) setPort(url.substring(portIdx, pathStart));
+        final int hostEnd = portIdx >= 0 ? portIdx : pathStart;
+        setHost(url.substring(hostStart, hostEnd));
+        int fragment = Utils.findFragmentIndex(url, pathStart);
+        if (fragment<0 || fragment<pathStart) {
+            fragment = url.length();
+        } else {
+            setFragment(url.substring(fragment));
+        }
+        int params = url.indexOf("?");
+        if (params < 0) {
+            params = url.length();
+        } else {
+            setParams(url.substring(params, fragment));
+        }
+        final int pathEnd = Math.min(fragment, params);
+        setPath(url.substring(pathStart, pathEnd));
     }
 
     public void setPath(String path) {
         if (null==path) return;
         if (!path.startsWith("/")) path = "/" + path;
-        replace(path, pathStart, pathEnd);
-    }
-
-    private void replace(final String host, final int from, final int to) {
-        final StringBuilder sb = new StringBuilder(url.length());
-        sb.append(url.substring(0, from));
-        sb.append(host);
-        sb.append(url.substring(to, url.length()));
-        update(sb.toString());
+        this.path = path;
     }
 
     public void setUrl(final String url) {
-        update(url);
+        init(url);
     }
 
-    public void fixPath() {
-        final String path = getPath();
-        if (!path.startsWith("/")) {
-            setPath("/" + path);
-        }
+    public String getUrl() {
+        return scheme + host + port + path + params + fragment;
     }
 
-    public void removePort() {
-        if (portIdx<0 || portIdx<hostEnd || portIdx>pathStart) return;
-        replace("", portIdx, pathStart);
+    @Override
+    public String toString() {
+        return getUrl();
     }
 }

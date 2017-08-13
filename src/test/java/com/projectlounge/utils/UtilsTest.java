@@ -5,10 +5,18 @@ import org.junit.Test;
 import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
-import java.util.Objects;
 
+import static org.hamcrest.CoreMatchers.any;
+import static org.hamcrest.CoreMatchers.anyOf;
+import static org.hamcrest.CoreMatchers.hasItems;
+import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Created by main on 08.08.17.
@@ -64,39 +72,11 @@ public class UtilsTest {
     }
 
     private void testReplaceWithPunyCode(final String url, final String expected) throws Exception {
-        final String actual = Utils.convertToPunyCode(url);
+        MutableUrl mutableUrl = new MutableUrl(url);
+        Utils.convertToPunyCode(mutableUrl);
+        final String actual = mutableUrl.getUrl();
         final String message = String.format("Failed to replace with punycode URL: '%s', result: '%s'", url, actual);
         assertEquals(message, expected, actual);
-    }
-
-    @Test //todo remove
-    public void canonicalize() throws Exception {
-        final List<String> lines = Files.readAllLines(Paths.get(PATH + "canonicalization.txt"));
-        int total = 0;
-        int passed = 0;
-        for (String line : lines) {
-            final String[] urls = line.split("\"");
-            final String url = urls[1];
-            final String expected = urls[3];
-            String actual = null;
-            Throwable error = null;
-            try {
-                 actual = Utils.canonicalize(url);
-            } catch (Throwable t) {
-                error = t;
-            }
-            final String message = String.format("Failed to canonicalize '%s' to '%s', result: '%s'", url, expected, actual);
-            if (Objects.equals(expected, actual)) {
-                passed++;
-            } else if (null!=error) {
-                System.out.printf("Failed to canonicalize '%s' because of error %s.\n", url, error.getMessage());
-                error.printStackTrace();
-            } else {
-                System.out.println(message);
-            }
-            total++;
-        }
-        System.out.printf("Result: %d of %d passed.", passed, total);
     }
 
     @Test
@@ -106,26 +86,25 @@ public class UtilsTest {
             final String[] urls = line.split("\"");
             final String url = urls[1];
             final String expected = urls[3];
-            final String actual = Utils.canonicalize(url);
+            final String actual = Utils.canonicalize(url).getUrl();
             final String message = String.format("Failed to canonicalize '%s' to '%s', result: '%s'", url, expected, actual);
             assertEquals(message, expected, actual);
         }
     }
 
-    @Test //todo remove
-    public void canonicalize1() throws Exception {
-        final String url = "http://www.gotaport.com:1234/";
-        final String expected = "http://www.gotaport.com/";
-        final String actual = Utils.canonicalize(url);
-        final String message = String.format("Failed to canonicalize '%s' to '%s', result: '%s'", url, expected, actual);
-        assertEquals(message, expected, actual);
-    }
-
     @Test
     public void removeFragment() throws Exception {
-        assertEquals("http://google.com/", Utils.removeFragment("http://google.com/"));
-        assertEquals("http://google.com/", Utils.removeFragment("http://google.com/#frag"));
-        assertEquals("http://пример.испытание/", Utils.removeFragment("http://пример.испытание/#frag"));
+        testRemoveFragment("http://google.com/", "http://google.com/");
+        testRemoveFragment("http://google.com/", "http://google.com/#frag");
+        testRemoveFragment("http://google.com/page", "http://google.com/page#frag");
+        testRemoveFragment("http://пример.испытание/", "http://пример.испытание/#frag");
+    }
+
+    private void testRemoveFragment(final String expected, final String url) {
+        final MutableUrl mutableUrl = new MutableUrl(url);
+        Utils.removeFragment(mutableUrl);
+        final String actual = mutableUrl.getUrl();
+        assertEquals(expected, actual);
     }
 
     @Test
@@ -167,17 +146,22 @@ public class UtilsTest {
 
     @Test
     public void percentEscape() throws Exception {
-        testPercentEscape("http://google.com/"+(char)12, "http://google.com/%0C");
-        testPercentEscape("http://google.com/"+(char)32, "http://google.com/%20");
-        testPercentEscape("http://google.com/"+(char)128, "http://google.com/%80");
+        testPercentEscape("http://google.com/"+(char)12, "http://google.com/");
         testPercentEscape("http://google.com/"+(char)55, "http://google.com/7");
-        testPercentEscape("http://google.com/ ", "http://google.com/%20");
-        testPercentEscape("http://google.com/#", "http://google.com/%23");
+        testPercentEscape("http://google.com/"+(char)32, "http://google.com/");
+        testPercentEscape("http://google.com/"+(char)33, "http://google.com/"+(char)33);
+        testPercentEscape("http://google.com/"+(char)126, "http://google.com/"+(char)126);
+        testPercentEscape("http://google.com/"+(char)127, "http://google.com/%7F");
+        testPercentEscape("http://google.com/"+(char)128, "http://google.com/%80");
+        testPercentEscape("http:// google.com/", "http://%20google.com/");
+        testPercentEscape("http://\\x01\\x80.com/", "http://%01%80.com/");
         testPercentEscape("http://google.com/%", "http://google.com/%25");
     }
 
     private void testPercentEscape(final String url, final String expected) throws Exception {
-        final String actual = Utils.percentEscape(url);
+        MutableUrl mutableUrl = new MutableUrl(url);
+        Utils.percentEscape(mutableUrl);
+        final String actual = mutableUrl.getUrl();
         final String message = String.format("Failed to percent escape URL: '%s', result: '%s'", url, actual);
         assertEquals(message, expected, actual);
     }
@@ -200,14 +184,14 @@ public class UtilsTest {
         testHostAndPath("http://google.com:80/#frag", "google.com", "/");
         testHostAndPath("http://google.com/", "google.com", "/");
         testHostAndPath("http://google.com:80/", "google.com", "/");
-        testHostAndPath("http://google.com:80", "google.com", "");
-        testHostAndPath("http://google.com", "google.com", "");
+        testHostAndPath("http://google.com:80", "google.com", "/");
+        testHostAndPath("http://google.com", "google.com", "/");
     }
 
     @Test
     public void changeHostAndPath() throws Exception {
         testChangeHost("http://www.google.com/q?r?s=2#frag", "www.yandex.ru", "http://www.yandex.ru/q?r?s=2#frag");
-        testChangeHost("http://www.google.com:80/q?r?s=2#frag", "www.yandex.ru", "http://www.yandex.ru:80/q?r?s=2#frag");
+        testChangeHost("http://www.google.com:80/q?r?s=2#frag", "www.yandex.com", "http://www.yandex.com:80/q?r?s=2#frag");
         testChangePath("http://www.google.com/q?r?s=2#frag", "/newPath", "http://www.google.com/newPath?r?s=2#frag");
         testChangePath("http://www.google.com:80/q?r?s=2#frag", "/newPath", "http://www.google.com:80/newPath?r?s=2#frag");
         testChangePath("http://www.google.com:80/q?r?s=2#frag", "", "http://www.google.com:80/?r?s=2#frag");
@@ -240,11 +224,6 @@ public class UtilsTest {
     }
 
     @Test
-    public void addTrailingSlash() throws Exception {
-        assertEquals("http://google.com/", Utils.addTrailingSlash("http://google.com"));
-    }
-
-    @Test
     public void escape() throws Exception {
         testEscape("%", "%25");
         testEscape("#", "%23");
@@ -262,5 +241,55 @@ public class UtilsTest {
         final String actual = Utils.parseIPAddress(host);
         final String message = String.format("Failed to parse IP Address '%s', result: '%s'", host, actual);
         assertEquals(message, "195.127.0.11", actual);
+    }
+
+    @Test
+    public void removeSpecialCharacters() throws Exception {
+        testRemoveSpecialCharacters("http://www.google.com/foo\tbar\rbaz\n2", "http://www.google.com/foobarbaz2");
+    }
+
+    private void testRemoveSpecialCharacters(final String url, final String expected) {
+        final MutableUrl mutableUrl = new MutableUrl(url);
+        Utils.removeSpecialCharacters(mutableUrl);
+        final String actual = mutableUrl.getUrl();
+        final String message = String.format("Failed to remove special characters from url: '%s', result: '%s'", url, actual);
+        assertEquals(message, expected, actual);
+    }
+
+    @Test
+    public void isIpAddress() throws Exception {
+        testIsIpAddress("", false);
+        testIsIpAddress("google.com", false);
+        testIsIpAddress("256.8.8.8", false);
+        testIsIpAddress("127.0.0.1", true);
+        testIsIpAddress("192.168.0.1", true);
+        testIsIpAddress("8.8.8.8", true);
+        testIsIpAddress("255.255.255.255", true);
+        testIsIpAddress("::ffff:192.0.2.1", true);
+        testIsIpAddress("2001:0db8:11a3:09d7:1f34:8a2e:07a0:765d", true);
+        testIsIpAddress("::", true);
+        testIsIpAddress("::1", true);
+    }
+
+    private void testIsIpAddress(final String ip, final boolean expected) {
+        final boolean actual = Utils.isIpAddress(ip);
+        final String message = String.format("Failed to check IP address string '%s', result '%b'", ip, actual);
+        assertEquals(message, expected, actual);
+    }
+
+    @Test
+    public void createPrefix() throws Exception {
+        testCreatePrefix("www.google.com", "www.google.com", "google.com");
+        testCreatePrefix("1.2.3.4.com", "1", "2", "3", "4");
+        testCreatePrefix("1.2.3.4.5.com", "2", "3", "4", "5");
+        testCreatePrefix("1.2.3.4.5.6.7.8.9.com", "6", "7", "8", "9");
+    }
+
+    private void testCreatePrefix(final String host, final String... parts) {
+        final Collection<String> expected = Arrays.asList(parts);
+        final Collection<String> actual = Utils.createPrefix(host);
+        assertThat(expected, hasItems(parts));
+        final String message = String.format("Failed to create prefix for '%s', result: '%s'", host, actual.toString());
+        assertEquals(message, expected.size(), actual.size());
     }
 }
