@@ -9,13 +9,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
-import static org.hamcrest.CoreMatchers.any;
-import static org.hamcrest.CoreMatchers.anyOf;
-import static org.hamcrest.CoreMatchers.hasItems;
-import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -280,16 +274,16 @@ public class UtilsTest {
     @Test
     public void createPrefix() throws Exception {
         testCreatePrefix("www.google.com", "www.google.com", "google.com");
-        testCreatePrefix("1.2.3.4.com", "1", "2", "3", "4");
-        testCreatePrefix("1.2.3.4.5.com", "2", "3", "4", "5");
-        testCreatePrefix("1.2.3.4.5.6.7.8.9.com", "6", "7", "8", "9");
+        testCreatePrefix("1.2.3.4.com","1.2.3.4.com", "2.3.4.com", "3.4.com", "4.com");
+        testCreatePrefix("1.2.3.4.5.com","1.2.3.4.5.com", "2.3.4.5.com", "3.4.5.com", "4.5.com", "5.com");
+        testCreatePrefix("1.2.3.4.5.6.com","1.2.3.4.5.6.com", "3.4.5.6.com", "4.5.6.com", "5.6.com", "6.com");
     }
 
     private void testCreatePrefix(final String host, final String... parts) {
         final Collection<String> expected = Arrays.asList(parts);
         final Collection<String> actual = Utils.createPrefix(host);
-        assertThat(expected, hasItems(parts));
-        final String message = String.format("Failed to create prefix for '%s', result: '%s'", host, actual.toString());
+        final String message = String.format("Failed to create prefix for '%s', result: '%s'", host, actual);
+        assertTrue(message, expected.containsAll(actual));
         assertEquals(message, expected.size(), actual.size());
     }
 }

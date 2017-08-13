@@ -43,12 +43,11 @@ public class Utils {
         result.add(host);
         boolean ipAddress = isIpAddress(host);
         if (ipAddress) return result;
-        final String[] split = host.split("\\.");
-        final int size = Math.min(split.length, 5);
-        final int from = size > 5 ? split.length - 5 : 0;
-        final List<String> list = Arrays.asList(split);
-        for (int i = from; i < size-1; i++) {
-            final String component = String.join(".", list.subList(i, split.length));
+        final List<String> split = Arrays.asList(host.split("\\."));
+        final int size = split.size();
+        final int from = size > 5 ? size - 5 : 0;
+        for (int i = from; i < size -1; i++) {
+            final String component = String.join(".", split.subList(i, size));
             result.add(component);
         }
         return result;
