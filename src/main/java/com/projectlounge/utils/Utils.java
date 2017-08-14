@@ -1,19 +1,17 @@
 package com.projectlounge.utils;
 
-import jersey.repackaged.com.google.common.collect.Lists;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.validator.routines.InetAddressValidator;
 
 import java.net.IDN;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Created by main on 08.08.17.
@@ -26,46 +24,66 @@ public class Utils {
     private static final Pattern TRAILING_SPACE_REGEXP = Pattern.compile("^(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})");
     private static final Pattern POSSIBLE_IP_REGEXP = Pattern.compile("^(?i)((?:0x[0-9a-f]+|[0-9\\.])+)$");
 
-    public static String hash(final String input)  {
+    public static Set<String> makeHashes(final String input)  {
         final MutableUrl url = canonicalize(input);
         final Set<String> expressions = createSuffixPrefixExpressions(url);
-        return url.toString();
+        final Set<String> hashes = expressions.stream().map(Utils::sha256Hex).collect(Collectors.toSet());
+        return hashes;
     }
 
-    private static Set<String> createSuffixPrefixExpressions(final MutableUrl url) {
-        final Collection<String> prefix = createPrefix(url.getHost());
-        final Set<String> result = new HashSet<>(30);
+    public static Set<String> createSuffixPrefixExpressions(final MutableUrl url) {
+        final Set<String> prefixes = createPrefix(url.getHost());
+        final Set<String> suffixes = createSuffix(url.getPath(), url.getParams());
+        final Set<String> result = new HashSet<>(prefixes.size() * suffixes.size());
+        for (String prefix : prefixes) {
+            for (String suffix : suffixes) {
+                result.add(prefix + suffix);
+            }
+        }
         return result;
     }
 
-    public static Collection<String> createPrefix(final String host) {
+    public static Set<String> createPrefix(final String host) {
         final Set<String> result = new HashSet<>(5);
         result.add(host);
         boolean ipAddress = isIpAddress(host);
         if (ipAddress) return result;
         final List<String> split = Arrays.asList(host.split("\\."));
         final int size = split.size();
-        final int from = size > 5 ? size - 5 : 0;
-        for (int i = from; i < size -1; i++) {
-            final String component = String.join(".", split.subList(i, size));
+        final int start = size > 5 ? size - 5 : 0;
+        for (int fromIndex = start; fromIndex < size - 1; fromIndex++) {
+            final String component = String.join(".", split.subList(fromIndex, size));
             result.add(component);
         }
         return result;
     }
 
-    public static boolean isIpAddress(final String host) {
-        return InetAddressValidator.getInstance().isValid(host);
+    public static Set<String> createSuffix(final String path, final String params) {
+        final Set<String> result = new HashSet<>(6);
+        result.add(path);
+        result.add(path + params);
+        final List<String> split = Arrays.asList(path.split("/"));
+        final int size = Math.min(split.size(), 5);
+        for (int toIndex = 1; toIndex < size; toIndex++) {
+            final String pathPart = buildPath(split, toIndex) + '/';
+            result.add(pathPart);
+        }
+        String pathPart = buildPath(split, size);
+        final boolean notLastComponent = size < split.size();
+        final boolean lastEndsWithSlash = size == split.size() && path.endsWith("/");
+        if (notLastComponent || lastEndsWithSlash) {
+            pathPart = pathPart + '/';
+        }
+        result.add(pathPart);
+        return result;
     }
 
-    public static Collection<String> makeSuffixPrefix(final String host, final String path, final String params) {
-        final List<String> result = new ArrayList<>();
-        result.add(host + path + params); // The exact path of the URL, including query parameters.
-        result.add(host + path); // The exact path of the URL, without query parameters.
-        final String[] pathComponents = path.split("/");
-        result.add(host + path + params);
-        result.add(host + path);
-        result.add(host + '/');
-        return result;
+    private static String buildPath(final List<String> split, final int to) {
+        return String.join("/", split.subList(0, to));
+    }
+
+    public static boolean isIpAddress(final String host) {
+        return InetAddressValidator.getInstance().isValid(host);
     }
 
     public static String hashPrefix4(final String input) {

@@ -8,6 +8,7 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -21,7 +22,8 @@ public class UtilsTest {
 
     @Test
     public void hash() throws Exception {
-
+        final Set<String> hashes = Utils.makeHashes("http://www.google.com/path/to/page?index.html");
+        System.out.println(hashes);
     }
 
     @Test
@@ -286,4 +288,62 @@ public class UtilsTest {
         assertTrue(message, expected.containsAll(actual));
         assertEquals(message, expected.size(), actual.size());
     }
+
+    @Test
+    public void createSuffix() throws Exception {
+        testCreateSuffix("/1/2.html", "?param=1", "/", "/1/2.html?param=1", "/1/2.html", "/1/");
+        testCreateSuffix("/path/to/page", "?p=1&p=2", "/", "/path/to/page?p=1&p=2", "/path/to/page", "/path/to/", "/path/");
+        testCreateSuffix("/1/2/3/4/5.html", "?p", "/", "/1/2/3/4/5.html", "/1/2/3/4/5.html?p", "/1/2/3/4/", "/1/2/3/", "/1/2/", "/1/");
+    }
+
+    private void testCreateSuffix(final String path, final String query, final String... parts) {
+        final Collection<String> expected = Arrays.asList(parts);
+        final Collection<String> actual = Utils.createSuffix(path, query);
+        final String message = String.format("Failed to create suffix for '%s%s', result: '%s'", path, query, actual);
+        assertTrue(message, expected.containsAll(actual));
+        assertEquals(message, expected.size(), actual.size());
+    }
+
+    @Test
+    public void createSuffixPrefix() throws Exception {
+        testCreateSuffixPrefix("http://a.b.c.d.e.f.g/1.html",
+                "a.b.c.d.e.f.g/1.html",
+                "a.b.c.d.e.f.g/",
+                "c.d.e.f.g/1.html",
+                "c.d.e.f.g/",
+                "d.e.f.g/1.html",
+                "d.e.f.g/",
+                "e.f.g/1.html",
+                "e.f.g/",
+                "f.g/1.html",
+                "f.g/"
+        );
+        testCreateSuffixPrefix("http://a.b.c/1/2.html?param=1",
+                "a.b.c/1/2.html?param=1",
+                "a.b.c/1/2.html",
+                "a.b.c/",
+                "a.b.c/1/",
+                "b.c/1/2.html?param=1",
+                "b.c/1/2.html",
+                "b.c/",
+                "b.c/1/"
+        );
+        testCreateSuffixPrefix("http://1.2.3.4/1/",
+                "1.2.3.4/1/",
+                "1.2.3.4/"
+        );
+    }
+
+    private void testCreateSuffixPrefix(final String url, final String... expected) {
+        final List<String> expectedList = Arrays.asList(expected);
+        final Set<String> actual = Utils.createSuffixPrefixExpressions(new MutableUrl(url));
+        for (String each : expectedList) {
+            final String message = String.format("Failed to create suffix/prefix for '%s' expected '%s' not in result: '%s", url, each, actual);
+            assertTrue(message, actual.contains(each));
+        }
+        final String message = String.format("Failed to create suffix prefix expr: actual size is not expected, '%s'", actual);
+        assertEquals(message, expectedList.size(), actual.size());
+        assertTrue("Failed to create suffix/prefix expr, expected 30 at most", actual.size() <= 30);
+    }
+
 }
