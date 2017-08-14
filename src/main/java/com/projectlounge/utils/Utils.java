@@ -7,7 +7,6 @@ import java.net.IDN;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -20,9 +19,39 @@ public class Utils {
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(Utils.class.getName());
 
-    // todo add other patterns
-    private static final Pattern TRAILING_SPACE_REGEXP = Pattern.compile("^(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})");
-    private static final Pattern POSSIBLE_IP_REGEXP = Pattern.compile("^(?i)((?:0x[0-9a-f]+|[0-9\\.])+)$");
+    private static final ThreadLocal<Pattern> TRAILING_SPACE_REGEXP = ThreadLocal.withInitial(
+            () -> Pattern.compile("^(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})")
+    );
+    private static final ThreadLocal<Pattern> POSSIBLE_IP_REGEXP = ThreadLocal.withInitial(
+            () -> Pattern.compile("^(?i)((?:0x[0-9a-f]+|[0-9\\.])+)$")
+    );
+    private static final ThreadLocal<Pattern> LEADING_TRAILING_DOTS = ThreadLocal.withInitial(
+            () -> Pattern.compile("^\\.+|\\.+$")
+    );
+    private static final ThreadLocal<Pattern> CONSECUTIVE_DOTS = ThreadLocal.withInitial(
+            () -> Pattern.compile("[.]+")
+    );
+    private static final ThreadLocal<Pattern> SPECIAL_CHARACTERS = ThreadLocal.withInitial(
+            () -> Pattern.compile("([\\r\\n\\t]|\\\\t|\\\\n|\\\\r)")
+    );
+    /** removing "/../" along with the preceding path component and replacing "/./" with "/" */
+    private static final ThreadLocal<Pattern> CANONICAL_PATH_1 = ThreadLocal.withInitial(
+            () -> Pattern.compile("(/?[^/]*/\\.\\./?)|(/[.]/)")
+    );
+    /** replace runs of consecutive slashes with a single slash character */
+    private static final ThreadLocal<Pattern> CANONICAL_PATH_2 = ThreadLocal.withInitial(
+            () -> Pattern.compile("/+")
+    );
+    /** remove all leading and trailing dots */
+    private static final ThreadLocal<Pattern> CANONICAL_HOST_1 = ThreadLocal.withInitial(
+            () -> Pattern.compile("^[.]+|[.]+$")
+    );
+    /** replace consecutive dots with a single dot */
+    private static final ThreadLocal<Pattern> CANONICAL_HOST_2 = ThreadLocal.withInitial(
+            () -> Pattern.compile("[.]+")
+    );
+
+    private static final int UNESCAPE_MAX_DEPTH = 1024;
 
     public static Set<String> makeHashes(final String input)  {
         final MutableUrl url = canonicalize(input);
@@ -113,9 +142,9 @@ public class Utils {
     }
 
     private static void makeValid(final MutableUrl url) {
-        final String host = url.getHost()
-                .replaceAll("^\\.+|\\.+$", "") // remove all leading and trailing dots
-                .replaceAll("[.]+", "."); // replace consecutive dots with a single dot
+        String host = url.getHost();
+        host = LEADING_TRAILING_DOTS.get().matcher(host).replaceAll("");
+        host = CONSECUTIVE_DOTS.get().matcher(host).replaceAll(".");
         url.setHost(host);
     }
 
@@ -131,29 +160,31 @@ public class Utils {
     }
 
     public static void percentUnescape(final MutableUrl url) {
-        final String path = unescape(url.getPath());
+        final String path = recursiveUnescape(url.getPath());
         url.setPath(path);
-        final String host = unescape(url.getHost());
+        final String host = recursiveUnescape(url.getHost());
         url.setHost(host);
     }
 
-    private static String unescape(String path) {
+    private static String recursiveUnescape(String path) {
         int i = 0;
-        while (i < 1024 && !Objects.equals(path, path = doUnescape(path))) { //todo simplify
+        while (i < UNESCAPE_MAX_DEPTH) {
+            final String prev = path;
+            path = unescape(prev);
+            if (prev.equals(path)) return path;
             i++;
         }
-        if (i == 1024) throw new IllegalArgumentException("");// todo name
-        return path;
+        throw new IllegalArgumentException("Safebrowsing: unescaping is too recursive!");
     }
 
-    private static String doUnescape(final String s) {
+    private static String unescape(final String s) {
         final int len = s.length();
         if (len < 3) return s;
         final int end = len - 2;
         final StringBuilder sb = new StringBuilder(s.length());
         for (int i = 0; i < len; i++) {
             final char c = s.charAt(i);
-            if (c == '%' && i < end && isHex(s.charAt(i + 1)) && isHex(s.charAt(i + 2))) {
+            if (c=='%' && i<end && isHex(s.charAt(i+1)) && isHex(s.charAt(i+2))) {
                 final String valueStr = s.substring(i+1, i+3);
                 final char hex = (char) Integer.parseInt(valueStr, 16);
                 sb.append(hex);
@@ -180,7 +211,7 @@ public class Utils {
 
     public static void removeSpecialCharacters(final MutableUrl url) {
         final String input = url.getUrl();
-        final String result = input.replaceAll("([\\r\\n\\t]|\\\\t|\\\\n|\\\\r)", "");
+        final String result = SPECIAL_CHARACTERS.get().matcher(input).replaceAll("");
         url.setUrl(result);
     }
 
@@ -207,19 +238,18 @@ public class Utils {
         return sb.toString();
     }
 
-    public static String canonicalizePath(final String path) {
-        final String regex1 = "/?[^/]*/\\.\\./?"; // removing "/../" along with the preceding path component
-        final String regex2 = "/[.]/"; // replacing "/./" with "/"
-        final String regex3 = "/+"; // replace runs of consecutive slashes with a single slash character
-        return path.replaceAll(regex1 + "|" + regex2, "/").replaceAll(regex3, "/");
+    public static String canonicalizePath(String path) {
+        path = CANONICAL_PATH_1.get().matcher(path).replaceAll("/");
+        path = CANONICAL_PATH_2.get().matcher(path).replaceAll("/");
+        return path;
     }
 
-    public static String canonicalizeHostName(final String host) {
-        String result = host.replaceAll("^[.]+|[.]+$", ""); // remove all leading and trailing dots
-        result = result.replaceAll("[.]+", "."); // replace consecutive dots with a single dot
-        result = normalizeIpAddress(result);
-        result = result.toLowerCase(); // lowercase the whole string
-        return result;
+    public static String canonicalizeHostName(String host) {
+        host = CANONICAL_HOST_1.get().matcher(host).replaceAll("");
+        host = CANONICAL_HOST_2.get().matcher(host).replaceAll(".");
+        host = normalizeIpAddress(host);
+        host = host.toLowerCase(); // lowercase the whole string
+        return host;
     }
 
     private static String normalizeIpAddress(final String host) {
@@ -267,12 +297,12 @@ public class Utils {
      */
     public static String parseIPAddress(String host) {
         if (host.length() <= 15) {
-            final Matcher matcher = TRAILING_SPACE_REGEXP.matcher(host);
+            final Matcher matcher = TRAILING_SPACE_REGEXP.get().matcher(host);
             if (matcher.matches()) {
                 host = host.trim();
             }
         }
-        final Matcher matcher = POSSIBLE_IP_REGEXP.matcher(host);
+        final Matcher matcher = POSSIBLE_IP_REGEXP.get().matcher(host);
         if (!matcher.matches()) {
             return host;
         }
