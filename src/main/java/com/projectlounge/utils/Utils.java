@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -53,10 +54,14 @@ public class Utils {
 
     private static final int UNESCAPE_MAX_DEPTH = 1024;
 
-    public static Set<String> makeHashes(final String input)  {
+    public static List<byte[]> makeHashesBinary(final String input)  {
+        return makeHashes(input, Utils::sha256);
+    }
+
+    private static <T> List<T> makeHashes(final String input, final Function<String, T> sha256) {
         final MutableUrl url = canonicalize(input);
         final Set<String> expressions = createSuffixPrefixExpressions(url);
-        final Set<String> hashes = expressions.stream().map(Utils::sha256Hex).collect(Collectors.toSet());
+        final List<T> hashes = expressions.stream().map(sha256).collect(Collectors.toList());
         return hashes;
     }
 
@@ -126,6 +131,10 @@ public class Utils {
 
     public static String sha256Hex(final String input) {
         return DigestUtils.sha256Hex(input);
+    }
+
+    public static byte[] sha256(final String input) {
+        return DigestUtils.sha256(input);
     }
 
     public static MutableUrl canonicalize(final String input) {

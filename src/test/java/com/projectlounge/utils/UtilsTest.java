@@ -1,17 +1,29 @@
 package com.projectlounge.utils;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParser;
+import lombok.Data;
+import lombok.ToString;
+import org.junit.Before;
 import org.junit.Test;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.client.RestTemplate;
 
 import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * Created by main on 08.08.17.
@@ -19,11 +31,15 @@ import static org.junit.Assert.assertTrue;
 public class UtilsTest {
 
     private static final String PATH = "src/test/resources/";
+    private static final String TEST_URL = "http://up.mykings.pw:8888/update.txt";
+    private static final String THREAT_LIST_TXT = "threatList.txt";
+    private static final String DECODED_HASHES = "decodedHashes.txt";
 
-    @Test
-    public void hash() throws Exception {
-        final Set<String> hashes = Utils.makeHashes("http://www.google.com/path/to/page?index.html");
-        System.out.println(hashes);
+    private static String apiKey;
+
+    @Before
+    public void setUp() throws Exception {
+        apiKey = new String(Files.readAllBytes(Paths.get(PATH + "apiKey.txt")), "utf-8");
     }
 
     @Test
@@ -344,6 +360,170 @@ public class UtilsTest {
         final String message = String.format("Failed to create suffix prefix expr: actual size is not expected, '%s'", actual);
         assertEquals(message, expectedList.size(), actual.size());
         assertTrue("Failed to create suffix/prefix expr, expected 30 at most", actual.size() <= 30);
+    }
+
+    @Test
+    public void saveThreatList() throws Exception {
+        final String url = "https://safebrowsing.googleapis.com/v4/threatListUpdates:fetch?key=" + apiKey;
+        final RestTemplate rest = new RestTemplate();
+        final TreatListRequest request = new TreatListRequest();
+        request.setClient(createClient());
+        final Map<String, String> listUpdateRequestsMap = new HashMap<>();
+        listUpdateRequestsMap.put("threatType", "UNWANTED_SOFTWARE");
+        listUpdateRequestsMap.put("platformType", "WINDOWS");
+        listUpdateRequestsMap.put("threatEntryType", "URL");
+        listUpdateRequestsMap.put("state", "");
+        final Object[] listUpdateRequests = new Object[]{listUpdateRequestsMap};
+        request.setListUpdateRequests(listUpdateRequests);
+        final ResponseEntity<String> entity = rest.postForEntity(url, request, String.class);
+        final String body = entity.getBody();
+        Files.write(Paths.get(PATH + THREAT_LIST_TXT), body.getBytes("UTF-8"));
+    }
+
+    @Test
+    public void decodeHashes() throws Exception {
+        final String json = new String(Files.readAllBytes(Paths.get(PATH + THREAT_LIST_TXT)), "UTF-8");
+        JsonElement element = new JsonParser().parse(json);
+        final JsonElement listUpdateResponses = element.getAsJsonObject().get("listUpdateResponses");
+        final JsonElement additions = listUpdateResponses.getAsJsonArray().get(0).getAsJsonObject().get("additions");
+        final JsonElement rawHashes = additions.getAsJsonArray().get(0).getAsJsonObject().get("rawHashes").getAsJsonObject().get("rawHashes");
+        final byte[] hashes = Base64.getDecoder().decode(rawHashes.getAsString());
+        Files.write(Paths.get(PATH + DECODED_HASHES), hashes);
+    }
+
+    @Test
+    public void hashesTest() throws Exception {
+        final List<byte[]> fullHashes = Utils.makeHashesBinary(TEST_URL);
+        final byte[] allHashes = Files.readAllBytes(Paths.get(PATH + DECODED_HASHES));
+        for (int i = 0; i < allHashes.length; i = i + 4) {
+            final byte[] hash = new byte[4];
+            System.arraycopy(allHashes, i, hash, 0, 4);
+            for (byte[] fullHash : fullHashes) {
+                final byte[] hashPrefix = Arrays.copyOf(fullHash, 4);
+                if (Arrays.equals(hash, hashPrefix)) {
+                    return;
+                }
+            }
+        }
+        fail("Hash not found!");
+    }
+
+    @Test
+    public void hashesNegativeTest() throws Exception {
+        final List<byte[]> fullHashes = Utils.makeHashesBinary("http://www.google.com");
+        final byte[] allHashes = Files.readAllBytes(Paths.get(PATH + DECODED_HASHES));
+        for (int i = 0; i < allHashes.length; i = i + 4) {
+            final byte[] hash = new byte[4];
+            System.arraycopy(allHashes, i, hash, 0, 4);
+            for (byte[] fullHash : fullHashes) {
+                final byte[] hashPrefix = Arrays.copyOf(fullHash, 4);
+                if (Arrays.equals(hash, hashPrefix)) {
+                    fail("Hash for safe URL has been found!");
+                }
+            }
+        }
+    }
+
+    @Test
+    public void fullHashesTest() throws Exception {
+        final List<byte[]> fullHashes = Utils.makeHashesBinary(TEST_URL);
+        final String api = "https://safebrowsing.googleapis.com/v4/fullHashes:find?key=" + apiKey;
+
+        final FullHashesRequest request = new FullHashesRequest();
+        request.setClient(createClient());
+        request.setApiClient(createClient());
+        final Map<String, Object> threatInfo = new HashMap<>();
+        threatInfo.put("threatTypes", new String[] {"MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION", "THREAT_TYPE_UNSPECIFIED"});
+        threatInfo.put("platformTypes", new String[] {"WINDOWS"});
+        threatInfo.put("threatEntryTypes", new String[] {"URL"});
+        final Object[] threatEntries = new Object[fullHashes.size()];
+        int i = 0;
+        for (byte[] fullHash : fullHashes) {
+            final Map<String, String> map = new HashMap<>();
+            map.put("url", TEST_URL);
+            map.put("hash", Base64.getEncoder().encodeToString(fullHash));
+            threatEntries[i++] = map;
+        }
+        threatInfo.put("threatEntries", threatEntries);
+        request.setThreatInfo(threatInfo);
+
+        final RestTemplate rest = new RestTemplate();
+        final ResponseEntity<String> entity = rest.postForEntity(api, request, String.class);
+        final String body = entity.getBody();
+        JsonElement element = new JsonParser().parse(body);
+        final JsonElement matches = element.getAsJsonObject().get("matches").getAsJsonArray().get(0);
+        final JsonElement threat = matches.getAsJsonObject().get("threat");
+        final JsonElement hash = threat.getAsJsonObject().get("hash");
+        final byte[] hashBinary = Base64.getDecoder().decode(hash.getAsString());
+        for (byte[] fullHash : fullHashes) {
+            if (Arrays.equals(fullHash, hashBinary)) {
+                return;
+            }
+        }
+        fail("Full hash not found!");
+    }
+
+    @Test
+    public void lookupTest() throws Exception {
+        final String api = "https://safebrowsing.googleapis.com/v4/threatMatches:find?key=" + apiKey;
+
+        final LookupRequest request = new LookupRequest();
+        request.setClient(createClient());
+        request.setThreatInfo(createThreatInfo());
+
+        final RestTemplate rest = new RestTemplate();
+        final ResponseEntity<String> entity = rest.postForEntity(api, request, String.class);
+        final String body = entity.getBody();
+        assertTrue(body.contains(TEST_URL));
+        JsonElement element = new JsonParser().parse(body);
+        final JsonElement matches = element.getAsJsonObject().get("matches").getAsJsonArray().get(0);
+        final JsonElement threat = matches.getAsJsonObject().get("threat");
+        final JsonElement url = threat.getAsJsonObject().get("url");
+        assertEquals("Failed to test url!", TEST_URL, url.getAsString());
+    }
+
+    private Map<String, Object> createThreatInfo() {
+        final Map<String, Object> threatInfo = new HashMap<>();
+        threatInfo.put("threatTypes", new String[] {"MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION", "THREAT_TYPE_UNSPECIFIED"});
+        threatInfo.put("platformTypes", new String[] {"WINDOWS"});
+        threatInfo.put("threatEntryTypes", new String[] {"URL"});
+        final Map<String,String> urlMap = new HashMap<>();
+        urlMap.put("url", TEST_URL);
+        threatInfo.put("threatEntries", new Object[]{urlMap});
+        return threatInfo;
+    }
+
+    private Map<String, String> createClient() {
+        final Map<String, String> client = new HashMap<>();
+        client.put("clientId", "My test company");
+        client.put("clientVersion", "1.5.2");
+        return client;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @Data
+    @ToString
+    private static class FullHashesRequest {
+        private Map<String, String> client;
+        private String[] clientStates;
+        private Map<String, Object> threatInfo;
+        private Map<String, String> apiClient;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @Data
+    @ToString
+    private static class TreatListRequest {
+        private Map<String, String> client;
+        private Object[] listUpdateRequests;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @Data
+    @ToString
+    private static class LookupRequest {
+        private Map<String, String> client;
+        private Map<String, Object> threatInfo;
     }
 
 }
