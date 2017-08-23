@@ -3,6 +3,9 @@ package com.projectlounge.utils;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
+import com.projectlounge.json.ThreatLists;
+import com.projectlounge.json.enums.PlatformType;
+import com.projectlounge.model.MutableUrl;
 import lombok.Data;
 import lombok.ToString;
 import org.junit.Before;
@@ -21,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static junit.framework.TestCase.assertFalse;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -526,4 +530,110 @@ public class UtilsTest {
         private Map<String, Object> threatInfo;
     }
 
+    @Test
+    public void hashesInt() throws Exception {
+        final byte[] input = new byte[]{ 1,2,3,4, 5,6,7,8, 9,10,11,12 };
+        final HashesInt hashes = new HashesInt(input);
+        final boolean matches = hashes.matches(new byte[]{5, 6, 7, 8});
+        assertTrue("Hash not found!", matches);
+        final boolean notMatches = hashes.matches(new byte[]{0, 0, 0, 0});
+        assertFalse("Inexistent hash has been found!", notMatches);
+    }
+
+    @Test
+    public void hashesByte1() throws Exception {
+        final HashesByte hashes = newHashesByte(15);
+        testHashesByte(hashes, 1, 2, 3, 4, 5);
+        testHashesByte(hashes, 6, 7, 8, 9, 10);
+        testHashesByte(hashes, 11, 12, 13, 14, 15);
+    }
+
+    @Test
+    public void hashesByte2() throws Exception {
+        final HashesByte hashes = newHashesByte(5);
+        testHashesByte(hashes, 1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void hashesByte3() throws Exception {
+        final HashesByte hashes = newHashesByte(10);
+        testHashesByte(hashes, 1, 2, 3, 4, 5);
+        testHashesByte(hashes, 6, 7, 8, 9, 10);
+    }
+
+    @Test
+    public void hashesByte4() throws Exception {
+        final HashesByte hashes = newHashesByte(5);
+        testHashesByte(hashes, 1, 2, 3, 4, 5);
+    }
+
+    @Test
+    public void hashesByteNegative1() throws Exception {
+        final HashesByte hashes = newHashesByte(25);
+        final boolean notMatches = hashes.matches(new byte[]{1,2,3,4,0});
+        assertFalse("Inexistent hash has been found!", notMatches);
+    }
+
+    @Test
+    public void hashesByteNegative2() throws Exception {
+        final HashesByte hashes = newHashesByte(25);
+        final boolean notMatches = hashes.matches(new byte[]{11,12,13,14,0});
+        assertFalse("Inexistent hash has been found!", notMatches);
+    }
+
+    @Test
+    public void hashesByteNegative3() throws Exception {
+        final HashesByte hashes = newHashesByte(25);
+        final boolean notMatches = hashes.matches(new byte[]{11,12,13,14,20});
+        assertFalse("Inexistent hash has been found!", notMatches);
+    }
+
+    @Test
+    public void hashesByteNegative4() throws Exception {
+        final HashesByte hashes = newHashesByte(25);
+        final boolean notMatches = hashes.matches(new byte[]{21,22,23,24,0});
+        assertFalse("Inexistent hash has been found!", notMatches);
+    }
+
+    @Test
+    public void hashesByteTooSmall() throws Exception {
+        final HashesByte hashes = newHashesByte(5);
+        try {
+            hashes.matches(new byte[]{0, 0, 0, 0});
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        fail("Worked on hash length smaller than hash prefix length!");
+    }
+
+    private HashesByte newHashesByte(final int size) {
+        final byte[] input = new byte[size];
+        for (int i = 0; i < size; i++) {
+            input[i] = (byte)(i+1);
+        }
+        return new HashesByte(input, 5);
+    }
+
+    private void testHashesByte(final Hashes hashes, final int... expected) {
+        final byte[] match = getBytes(expected);
+        final boolean matches = hashes.matches(match);
+        assertTrue(String.format("Hash '%s' not found!", Arrays.toString(match)), matches);
+    }
+
+    private byte[] getBytes(final int[] expected) {
+        final byte[] match = new byte[expected.length];
+        int i = 0;
+        for (int each : expected) {
+            match[i++] = (byte) each;
+        }
+        return match;
+    }
+
+    @Test
+    public void findByName() throws Exception {
+        final PlatformType actual1 = Utils.findByName("winDows", PlatformType.class);
+        assertEquals(PlatformType.WINDOWS, actual1);
+        final PlatformType actual2 = Utils.findByName("test", PlatformType.class);
+        assertEquals(null, actual2);
+    }
 }

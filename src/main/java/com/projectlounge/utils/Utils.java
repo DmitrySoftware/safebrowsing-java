@@ -1,5 +1,7 @@
 package com.projectlounge.utils;
 
+import com.projectlounge.json.enums.PlatformType;
+import com.projectlounge.model.MutableUrl;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.validator.routines.InetAddressValidator;
 
@@ -360,6 +362,18 @@ public class Utils {
         try {
             return Long.parseLong(s);
         } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    public static String getThreatListsUrl() {
+        return "https://safebrowsing.googleapis.com/v4/threatLists?key="; //todo api key
+    }
+
+    public static <T extends Enum<T>> T findByName(final String name, final Class<T> clazz) {
+        try {
+            return Enum.valueOf(clazz, name.toUpperCase());
+        } catch (Exception e) {
             return null;
         }
     }

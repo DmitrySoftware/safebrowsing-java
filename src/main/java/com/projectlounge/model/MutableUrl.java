@@ -1,5 +1,6 @@
-package com.projectlounge.utils;
+package com.projectlounge.model;
 
+import com.projectlounge.utils.Utils;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
