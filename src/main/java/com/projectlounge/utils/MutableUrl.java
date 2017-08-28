@@ -1,6 +1,5 @@
-package com.projectlounge.model;
+package com.projectlounge.utils;
 
-import com.projectlounge.utils.Utils;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
@@ -55,7 +54,7 @@ public class MutableUrl {
         if (portIdx > 0) setPort(url.substring(portIdx, pathStart));
         final int hostEnd = portIdx >= 0 ? portIdx : pathStart;
         setHost(url.substring(hostStart, hostEnd));
-        int fragment = Utils.findFragmentIndex(url, pathStart);
+        int fragment = findFragmentIndex(url, pathStart);
         if (fragment<0 || fragment<pathStart) {
             fragment = url.length();
         } else {
@@ -69,6 +68,16 @@ public class MutableUrl {
         }
         final int pathEnd = Math.min(fragment, params);
         setPath(url.substring(pathStart, pathEnd));
+    }
+
+    private static int findFragmentIndex(final String url, final int pathIndex) {
+        int i = url.length();
+        while (--i > pathIndex) {
+            final char c = url.charAt(i);
+            if (c == '#') return i;
+            if (!Character.isLetterOrDigit(c)) return -1;
+        }
+        return -1;
     }
 
     public void setPath(String path) {

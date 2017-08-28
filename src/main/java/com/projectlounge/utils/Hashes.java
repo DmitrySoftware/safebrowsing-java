@@ -7,4 +7,9 @@ public interface Hashes {
 
     boolean matches(byte[] hash);
 
+    Hashes combine(byte[] hash);
+    Hashes remove(byte[] hash);
+
+
+
 }
