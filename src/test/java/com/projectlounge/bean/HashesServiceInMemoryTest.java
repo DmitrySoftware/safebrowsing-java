@@ -12,12 +12,14 @@ import com.projectlounge.json.ThreatList;
 import com.projectlounge.json.ThreatListUpdatesRequest;
 import com.projectlounge.json.ThreatListUpdatesResponse;
 import com.projectlounge.json.enums.PlatformType;
+import com.projectlounge.json.enums.ResponseType;
 import com.projectlounge.json.enums.ThreatEntryType;
 import com.projectlounge.json.enums.ThreatType;
 import org.junit.Before;
 import org.junit.Test;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.web.client.RestTemplate;
 
 import javax.inject.Inject;
@@ -41,6 +43,7 @@ import static org.mockito.Mockito.when;
 /**
  * Created by main on 28.08.17.
  */
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 public class HashesServiceInMemoryTest extends BaseTest {
 
     private static final String UNWANTED_SOFTWARE_WINDOWS_URL_TXT = "UNWANTED_SOFTWARE_WINDOWS_URL.txt";
@@ -57,7 +60,7 @@ public class HashesServiceInMemoryTest extends BaseTest {
         when(updateApi.loadThreatListUpdates(any())).thenReturn(getThreatListUpdatesResponse(THREAT_LIST_TXT));
     }
 
-    @Test
+//    @Test
     public void saveThreatList() throws Exception {
         final String url = "https://safebrowsing.googleapis.com/v4/threatListUpdates:fetch?key=" + properties.get("apiKey");
         final RestTemplate rest = new RestTemplate();
@@ -97,6 +100,7 @@ public class HashesServiceInMemoryTest extends BaseTest {
         update.setPlatformType(PlatformType.WINDOWS);
         final String clientState = listUpdateResponses.getAsJsonArray().get(0).getAsJsonObject().get("newClientState").getAsString();
         update.setNewClientState(clientState);
+        update.setResponseType(ResponseType.FULL_UPDATE);
         final ListUpdateResponse[] responses = new ListUpdateResponse[] {update};
         response.setListUpdateResponses(responses);
         return response;
@@ -114,8 +118,7 @@ public class HashesServiceInMemoryTest extends BaseTest {
 
     @Test
     public void updateCacheFromFile() throws Exception {
-        final boolean matches = test.matches(TEST_URL).get();
-        assertFalse("Hit on empty cache!", matches);
+        assertFalse("Hit on empty cache!", test.matches(TEST_URL).get());
         test.updateCache();
         assertTrue("Test URL not found!", test.matches(TEST_URL).get());
     }
@@ -135,19 +138,6 @@ public class HashesServiceInMemoryTest extends BaseTest {
         when(updateApi.loadThreatListUpdates(any())).thenReturn(getThreatListUpdatesResponse(UNWANTED_SOFTWARE_WINDOWS_URL_TXT));
         final Collection<ThreatList> threatLists = Arrays.asList(new ThreatList());
         assertFalse("Result for unknown threat list!", test.matches(TEST_URL, threatLists).isPresent());
-    }
-
-    @Test
-    public void getNextUpdateTime() throws Exception {
-        final Calendar c1 = Calendar.getInstance();
-        final Calendar c2 = Calendar.getInstance();
-        c2.setTime(c1.getTime());
-        final long nextUpdateTime = test.getNextUpdateTime("15.1s");
-        c2.setTimeInMillis(nextUpdateTime);
-        c1.add(Calendar.SECOND, 16);
-        c1.set(Calendar.MILLISECOND, 0);
-        c2.set(Calendar.MILLISECOND, 0);
-        assertEquals(c1, c2);
     }
 
 }

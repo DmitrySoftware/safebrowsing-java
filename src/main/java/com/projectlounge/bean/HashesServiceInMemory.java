@@ -1,20 +1,13 @@
 package com.projectlounge.bean;
 
-import com.projectlounge.json.Constraints;
-import com.projectlounge.json.ListUpdateRequest;
 import com.projectlounge.json.ListUpdateResponse;
 import com.projectlounge.json.ThreatEntrySet;
 import com.projectlounge.json.ThreatList;
-import com.projectlounge.json.ThreatListUpdatesResponse;
 import com.projectlounge.json.enums.CompressionType;
-import com.projectlounge.json.enums.PlatformType;
-import com.projectlounge.json.enums.ThreatEntryType;
-import com.projectlounge.json.enums.ThreatType;
 import com.projectlounge.utils.Hashes;
-import com.projectlounge.utils.Utils;
+import com.projectlounge.utils.HashesServiceBase;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
+import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
 import java.util.Arrays;
@@ -24,67 +17,55 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Created by main on 23.08.17.
  */
-@Component
+@Service
 @Slf4j
-public class HashesServiceInMemory implements HashesService {
+public class HashesServiceInMemory extends HashesServiceBase {
 
     private final ConcurrentMap<ThreatList, String> threatListStateMap;
     private final ConcurrentMap<ThreatList, Hashes> hashesMap;
     private final HashUtils hashUtils;
-    private final UpdateApi updateApi;
-    private final AtomicLong nextUpdate;
     private final Create create;
 
     @Inject
     public HashesServiceInMemory(final HashUtils hashUtils, final UpdateApi updateApi, final Create create) {
+        super(updateApi);
         this.create = create;
         this.threatListStateMap  = new ConcurrentHashMap<>();
         this.hashesMap = new ConcurrentHashMap<>();
-        this.nextUpdate = new AtomicLong(0);
         this.hashUtils = hashUtils;
-        this.updateApi = updateApi;
     }
 
     @Override
-    public void updateCache() {
-        if (minimumWaitTimeNotReached()) {
-            log.info("Update cache skipped: minimum wait time not reached.");
-            return;
-        }
-        try {
-            log.info("Executing update cache...");
-            final long time = executeUpdateCache();
-            nextUpdate.set(time);
-            log.info("[DONE] Executing update cache, next update time: [{}]", nextUpdate.get());
-        } catch (Throwable t) {
-            log.error("[FAILURE] Executing update cache!", t);
-        }
+    protected void fullUpdate(final ListUpdateResponse update) {
+        final ThreatList threatList = createThreatList(update);
+        log.info("Running full hashes update for [{}]", threatList);
+        final Hashes newHashes = createNew(update);
+        hashesMap.put(threatList, newHashes);
+        threatListStateMap.put(threatList, update.getNewClientState());
     }
 
-    private long executeUpdateCache() {
-        final Set<ThreatList> threatLists = updateApi.loadThreatLists();
-        final ListUpdateRequest[] requests = createListUpdateRequests(threatLists);
-        final ThreatListUpdatesResponse response = updateApi.loadThreatListUpdates(requests);
-        for (ListUpdateResponse update : response.getListUpdateResponses()) {
-            final ThreatList threatList = createThreatList(update);
-            log.info("Creating hash for [{}]", threatList);
-            final Hashes hashes = hashesMap.get(threatList);
-            final Hashes newHashes = newHashes(update, hashes);
-            hashesMap.put(threatList, newHashes);
-            threatListStateMap.put(threatList, update.getNewClientState());
-        }
-        return getNextUpdateTime(response.getMinimumWaitDuration());
+    @Override
+    protected void partialUpdate(final ListUpdateResponse update) {
+        final ThreatList threatList = createThreatList(update);
+        log.info("Running partial hashes update for [{}]", threatList);
+        final Hashes hashes = hashesMap.get(threatList);
+        final Hashes newHashes = combineHashes(update, hashes);
+        hashesMap.put(threatList, newHashes);
+        threatListStateMap.put(threatList, update.getNewClientState());
     }
 
-    private Hashes newHashes(final ListUpdateResponse update, final Hashes hashes) {
+    @Override
+    protected String getState(final ThreatList threatList) {
+        return threatListStateMap.getOrDefault(threatList, "");
+    }
+
+    private Hashes combineHashes(final ListUpdateResponse update, final Hashes hashes) {
         return (null==hashes) ? createNew(update) : updateHashes(update, hashes);
     }
 
@@ -101,29 +82,23 @@ public class HashesServiceInMemory implements HashesService {
     }
 
     private Hashes updateHashes(final ListUpdateResponse update, Hashes hashes) {
-        final ThreatEntrySet[] removals = update.getRemovals();
-        if (null != removals) {
-            for (ThreatEntrySet removal : removals) {
-                hashes = remove(hashes, removal);
-            }
-        }
-        final ThreatEntrySet[] additions = update.getAdditions();
-        if (null != additions) {
-            for (ThreatEntrySet addition : additions) {
-                hashes = add(hashes, addition);
-            }
+        hashes = transform(hashes, update.getRemovals(), this::remove);
+        hashes = transform(hashes, update.getAdditions(), this::add);
+        return hashes;
+    }
+
+    private Hashes transform(Hashes hashes, final ThreatEntrySet[] threatEntrySets, final Transform transform) {
+        if (null == threatEntrySets) return hashes;
+        for (ThreatEntrySet set : threatEntrySets) {
+            if (CompressionType.RAW != set.getCompressionType()) continue; //todo compression
+            hashes = transform.apply(hashes, set);
         }
         return hashes;
     }
 
-    long getNextUpdateTime(final String minimumWaitDuration) {
-        if (StringUtils.isEmpty(minimumWaitDuration)) return 0;
-        final String s = minimumWaitDuration.substring(0, minimumWaitDuration.length() - 1);
-        final double seconds = Double.parseDouble(s);
-        final long newMinimumWaitTime = (long) Math.ceil(seconds);
-        return System.currentTimeMillis() + (newMinimumWaitTime * 1000);
+    private interface Transform {
+        Hashes apply(Hashes hashes, ThreatEntrySet set);
     }
-
 
     private Hashes add(final Hashes hashes, final ThreatEntrySet addition) {
         final byte[] bytes = getHashes(addition);
@@ -145,34 +120,6 @@ public class HashesServiceInMemory implements HashesService {
         threatList.setThreatEntryType(update.getThreatEntryType().name());
         threatList.setPlatformType(update.getPlatformType().name());
         return threatList;
-    }
-
-    private ListUpdateRequest[] createListUpdateRequests(final Collection<ThreatList> threatLists) {
-        final ListUpdateRequest[] result = new ListUpdateRequest[threatLists.size()];
-        int i = 0;
-        for (ThreatList threatList : threatLists) {
-            final ListUpdateRequest request = new ListUpdateRequest();
-            request.setPlatformType(Utils.findByName(threatList.getPlatformType(), PlatformType.class));
-            request.setThreatEntryType(Utils.findByName(threatList.getThreatEntryType(), ThreatEntryType.class));
-            request.setThreatType(Utils.findByName(threatList.getThreatType(), ThreatType.class));
-            request.setConstraints(getConstraints());
-            request.setState(threatListStateMap.getOrDefault(threatList, ""));
-            result[i++] = request;
-        }
-        return result;
-    }
-
-    private Constraints getConstraints() {
-        final Constraints constraints = new Constraints();
-        constraints.setMaxUpdateEntries(0);
-        constraints.setMaxDatabaseEntries(0);
-        constraints.setRegion("");
-        constraints.setSupportedCompressions(new CompressionType[]{ CompressionType.RAW }); //todo raw
-        return constraints;
-    }
-
-    private boolean minimumWaitTimeNotReached() {
-        return System.currentTimeMillis() < nextUpdate.get();
     }
 
     @Override
